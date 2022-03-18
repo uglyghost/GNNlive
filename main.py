@@ -125,7 +125,7 @@ if __name__ == '__main__':
         # 获取所有用户历史记录
         for index, client in enumerate(videoUsers):
             next_vec, view_point_fix = client.get_history()
-            if index == args.visId + args.trainNum:
+            if index == args.visId:
                 view_point = view_point_fix
             historyRecord.append(next_vec)
 
@@ -133,7 +133,7 @@ if __name__ == '__main__':
             for index2, value2 in enumerate(historyRecord[index1 + 1:]):
                 similarity = np.sum(np.trunc((np.sum([value1, value2], axis=0))) != 1)
                 if similarity > args.threshold:
-                    edge_list1.append((index1, index2))
+                    edge_list1.append((index1, index1 + 1 + index2))
 
         for index1 in range(totalUser):
             if index1 < args.trainNum:
@@ -161,14 +161,14 @@ if __name__ == '__main__':
 
         node_embeddings = model.sage(hGraph, node_features)
 
-        user_embeddings = node_embeddings['user'][0:args.trainNum]
+        user_embeddings = node_embeddings['user']
         tile_embeddings = node_embeddings['tile']
 
         result = model.predict(user_embeddings, tile_embeddings, args.thred)
 
         TP, TN, FP, FN = 0, 0, 0, 0
         PredictedTile = 0
-        for index1, value1 in enumerate(labels[args.trainNum:-1]):
+        for index1, value1 in enumerate(labels):
 
             if args.visId == index1:
                 env.setPrediction(result[index1, :])
@@ -202,9 +202,9 @@ if __name__ == '__main__':
         avePreTile = PredictedTile / (8 * args.testNum)
 
         if precision >= 0.8 and recall < 0.6:
-            args.thred += +0.05
+            args.thred += +0.1
         elif precision < 0.8:
-            args.thred += -0.05
+            args.thred += -0.1
 
         print("accuracy:", str(accuracy),
               "precision:", str(precision),
