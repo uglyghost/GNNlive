@@ -310,7 +310,7 @@ class LiveVideo(object):
         # 历史观看和训练完的saliency作为状态
         next_vec = self.stateToVec(view_point)
 
-        return next_vec
+        return next_vec, view_point_fix
 
     def getNextSate(self):
         next_state = []

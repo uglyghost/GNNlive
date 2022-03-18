@@ -3,26 +3,88 @@ from live_video import LiveVideo
 import numpy as np
 
 import dgl
-import torch
-import networkx as nx
+import torch as th
+from model.RGCN import Model
+from matplotlib import animation
 import matplotlib.pyplot as plt
+import gym
 
 
-def build_graph(node_num, edge_list):
-    g = dgl.DGLGraph()
-    # add 34 nodes into the graph; nodes are labeled from 0~33
-    g.add_nodes(node_num)
-    # add edges two lists of nodes: src and dst
-    src, dst = tuple(zip(*edge_list))
-    g.add_edges(src, dst)
-    # edges are directional in DGL; make them bi-directional
-    g.add_edges(dst, src)
+def display_frames_as_gif(policy, frames):
+    patch = plt.imshow(frames[0])
+    plt.axis('off')
 
-    return g
+    def animate(i):
+        patch.set_data(frames[i])
+
+    anim = animation.FuncAnimation(plt.gcf(), animate, frames=len(frames), interval=5)
+    anim.save('./' + policy + '_viewport_result.gif', writer='ffmpeg', fps=30)
+
+
+def build_graph(edge_list1, edge_list2, edge_list3):
+
+    src1, dst1 = tuple(zip(*edge_list1))
+    src1, dst1 = th.tensor(src1), th.tensor(dst1)
+    u = th.cat((src1, dst1))
+    v = th.cat((dst1, src1))
+
+    src2, dst2 = tuple(zip(*edge_list2))
+    src2, dst2 = th.tensor(src2), th.tensor(dst2)
+    w = src2
+    x = dst2
+
+    src3, dst3 = tuple(zip(*edge_list3))
+    src3, dst3 = th.tensor(src3), th.tensor(dst3)
+    y = th.cat((src3, dst3))
+    z = th.cat((dst3, src3))
+    # Create a heterograph with 2 node types and 2 edges types.
+    graph_data = {
+        ('user', 'similarity', 'user'): (u, v),
+        ('user', 'interest', 'tile'): (w, x),
+        ('tile', 'with', 'tile'): (y, z)
+    }
+    hg = dgl.heterograph(graph_data)
+
+    hg.nodes['user'].data['feature'] = th.randn(hg.num_nodes('user'), 10)
+    hg.nodes['tile'].data['feature'] = th.randn(hg.num_nodes('tile'), 10)
+    hg.edges['similarity'].data['weight'] = th.ones(hg.num_edges('similarity'), 1)
+    hg.edges['interest'].data['weight'] = th.ones(hg.num_edges('interest'), 1)
+
+    print(hg)
+
+    # g = dgl.graph((u, v), num_nodes=user_num + tile_num)
+    return hg
+
+
+def tuple_of_tensors_to_tensor(tuple_of_tensors):
+    return th.stack(list(tuple_of_tensors), dim=0)
+
+
+def construct_negative_graph(graph, k, etype):
+    utype, _, vtype = etype
+    src, dst = graph.edges(etype=etype)
+    neg_src = src.repeat_interleave(k)
+    neg_dst = th.randint(0, graph.num_nodes(vtype), (len(src) * k,))
+    return dgl.heterograph(
+        {etype: (neg_src, neg_dst)},
+        num_nodes_dict={ntype: graph.num_nodes(ntype) for ntype in graph.ntypes})
+
+
+def compute_loss(pos_score, neg_score):
+    # 间隔损失
+    n_edges = pos_score.shape[0]
+    return (1 - pos_score.unsqueeze(1) + neg_score.view(n_edges, -1)).clamp(min=0).mean()
+
 
 if __name__ == '__main__':
 
     args = get_args()
+
+    if args.cuda and th.cuda.is_available():
+        device = th.device('cuda')
+        th.backends.cudnn.benchmark = True
+    else:
+        device = th.device('cpu')
 
     videoUsers = []
 
@@ -40,36 +102,113 @@ if __name__ == '__main__':
         videoUsers[index].videoLoad()
 
     totalTime = videoUsers[0].get_time()
-    historyRecord = []
 
     # 主循环
+    env = gym.make('MyEnv-v1')
+    frames = []
+
     for a in range(totalTime):
         # edge list for GCN
-        edge_list = []
+        historyRecord = []
+        edge_list1 = []     # user to user
+        edge_list2 = []     # tile to user
+        edge_list3 = []  # tile to user
+        labels = []
+
+        '''
+        for index1 in range(0, 199, 5):
+            for index2 in range(4):
+                edge_list3.append((index1 + index2, index1 + index2 + 1))
+        '''
+        edge_list3.append((0, 199))
+
         # 获取所有用户历史记录
         for index, client in enumerate(videoUsers):
-            historyRecord.append(client.get_history())
+            next_vec, view_point_fix = client.get_history()
+            if index == args.visId + args.trainNum:
+                view_point = view_point_fix
+            historyRecord.append(next_vec)
 
         for index1, value1 in enumerate(historyRecord):
             for index2, value2 in enumerate(historyRecord[index1 + 1:]):
-                similarity = np.sum(np.trunc((value1 + value2)) != 1)
+                similarity = np.sum(np.trunc((np.sum([value1, value2], axis=0))) != 1)
                 if similarity > args.threshold:
-                    edge_list.append((index1, index2 + index1 + 1))
+                    edge_list1.append((index1, index2))
 
-        graph = build_graph(totalUser, edge_list)
+        for index1 in range(totalUser):
+            if index1 < args.trainNum:
+                for index2, value2 in enumerate(historyRecord[index1]):
+                    if value2 == 1:
+                        edge_list2.append((index1, index2))
+            labels.append(historyRecord[index1])
 
-        # 画个图看看情况
-        print('%d nodes.' % graph.number_of_nodes())
-        print('%d edges.' % graph.number_of_edges())
+        hGraph = build_graph(edge_list1, edge_list2, edge_list3)
 
-        fig, ax = plt.subplots()
-        fig.set_tight_layout(False)
-        nx_G = graph.to_networkx().to_undirected()
-        pos = nx.kamada_kawai_layout(nx_G)
-        nx.draw(nx_G, pos, with_labels=True, node_color=[[0.5, 0.5, 0.5]])
-        plt.show()
+        k = 5
+        model = Model(10, 20, k, hGraph.etypes)
+        user_feats = hGraph.nodes['user'].data['feature']
+        tile_feats = hGraph.nodes['tile'].data['feature']
+        node_features = {'user': user_feats, 'tile': tile_feats}
+        opt = th.optim.Adam(model.parameters())
+        for epoch in range(args.epochGCN):
+            negative_graph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
+            pos_score, neg_score = model(hGraph, negative_graph, node_features, ('user', 'interest', 'tile'))
+            loss = compute_loss(pos_score, neg_score)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            # print(loss.item())
 
-        # assign features to nodes or edges
-        graph.ndata['feat'] = torch.eye(34)
-        print(graph.nodes[2].data['feat'])
-        print(graph.nodes[1, 2].data['feat'])
+        node_embeddings = model.sage(hGraph, node_features)
+
+        user_embeddings = node_embeddings['user'][0:args.trainNum]
+        tile_embeddings = node_embeddings['tile']
+
+        result = model.predict(user_embeddings, tile_embeddings, args.thred)
+
+        TP, TN, FP, FN = 0, 0, 0, 0
+        PredictedTile = 0
+        for index1, value1 in enumerate(labels[args.trainNum:-1]):
+
+            if args.visId == index1:
+                env.setPrediction(result[index1, :])
+                env.setFov(view_point)
+                frames.append(env.render(mode='rgb_array'))
+                env.render()
+
+            for index2, value2 in enumerate(value1):
+                if value2 == 1 and result[index1, index2] == 1:
+                    TP += 1
+                    PredictedTile += 1
+                elif value2 == 1 and result[index1, index2] == 0:
+                    FP += 1
+                elif value2 == 0 and result[index1, index2] == 1:
+                    FN += 1
+                    PredictedTile += 1
+                elif value2 == 0 and result[index1, index2] == 0:
+                    TN += 1
+
+        accuracy = (TP + TN) / (TP + TN + FP + FN)
+        if (TP + FP) == 0:
+            precision = 0
+        else:
+            precision = TP / (TP + FP)
+
+        if (TP + FN) == 0:
+            recall = 0
+        else:
+            recall = TP / (TP + FN)
+
+        avePreTile = PredictedTile / (8 * args.testNum)
+
+        if precision >= 0.8 and recall < 0.6:
+            args.thred += +0.05
+        elif precision < 0.8:
+            args.thred += -0.05
+
+        print("accuracy:", str(accuracy),
+              "precision:", str(precision),
+              "recall", str(recall),
+              "predicted tile", str(avePreTile))
+
+    display_frames_as_gif(args.policy, frames)
