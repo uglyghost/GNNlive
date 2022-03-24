@@ -24,7 +24,7 @@ class allWriter(object):
     写入数据
     """
     def writerHead(self, TileNO):
-        rows = [['VideoName', 'UserIndex', 'epochCNN'],
+        rows = [['VideoName', 'UserIndex', 'epochRGCN'],
                 [self.videoName, str(self.userId), str(self.epochGCN)]]
         self.writerAcc.writerows(rows)
         self.writerTime.writerows(rows)

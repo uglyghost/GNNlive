@@ -44,7 +44,7 @@ class LiveVideo(object):
 
         self.allWriter = allWriter(config, self.videoName)
 
-        self.tileNO = 5  # TileNo: 分块大小 (5 * 5)
+        self.tileNO = config.tileNum  # TileNo: 分块大小 (5 * 5)
         self.totalTile = self.tileNO * self.tileNO  # 25 tiles
         self.countMain = 0  # 程序主计数器
         self.colorPrediction = (255, 0, 0)  # BGR
@@ -300,7 +300,7 @@ class LiveVideo(object):
 
     def get_history(self):
         # 获取观看者历史观看点
-        view_point = self.getNextSate()
+        view_point = self.getCurrSate()
 
         # 获取用户的实际观看记录
         view_point_fix = []
@@ -312,16 +312,37 @@ class LiveVideo(object):
 
         return next_vec, view_point_fix
 
-    def getNextSate(self):
+    def getCurrSate(self):
         next_state = []
-        if self.countMain + self.bufLen < self.totalFrames:
+        countMain = self.countMain
+        if countMain + self.bufLen < self.totalFrames:
             for i in range(self.bufLen):
                 if i % self.sampleRate == 0:
-                    next_state.append(self.LocationPerFrame[math.ceil(self.interFOV * (self.countMain - 1)) + 1])
-                self.countMain += 1
+                    next_state.append(self.LocationPerFrame[math.ceil(self.interFOV * (countMain - 1)) + 1])
+                countMain += 1
             return next_state
         else:
             return next_state
+
+    def changeToNext(self):
+        if self.countMain + self.bufLen < self.totalFrames:
+            for i in range(self.bufLen):
+                self.countMain += 1
+
+    def get_nextView(self):
+        # 获取观看者历史观看点
+        self.changeToNext()
+        view_point = self.getCurrSate()
+
+        # 获取用户的实际观看记录
+        view_point_fix = []
+        for index, value in enumerate(view_point):
+            view_point_fix.append([value[0] / self.W_Frame, value[1] / self.H_Frame])
+
+        # 历史观看和训练完的saliency作为状态
+        next_vec = self.stateToVec(view_point)
+
+        return next_vec, view_point_fix
 
     def get_frame_tensor(self):
         # 运行的主要函数
