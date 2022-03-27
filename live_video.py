@@ -275,7 +275,7 @@ class LiveVideo(object):
         self.out = self.allWriter.writerVideo(self.frameRate, self.W_Frame, self.H_Frame)
 
     def get_time(self):
-        return int(self.totalFrames / self.bufLen)
+        return int(self.totalFrames / self.bufLen) - 1
 
     # 将viewpoint转化为200维向量
     def stateToVec(self, next_state):

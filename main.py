@@ -22,7 +22,7 @@ def display_frames_as_gif(policy, frames):
     anim.save('./' + policy + '_viewport_result.gif', writer='ffmpeg', fps=30)
 
 
-def build_graph(edge_list1, edge_list2, edge_list3, userEmbedding):
+def build_graph(edge_list1, edge_list2, edge_list3, userEmbedding, tileEmbedding):
 
     src1, dst1 = tuple(zip(*edge_list1))
     src1, dst1 = th.tensor(src1).to('cuda:0'), th.tensor(dst1).to('cuda:0')
@@ -47,7 +47,7 @@ def build_graph(edge_list1, edge_list2, edge_list3, userEmbedding):
     hg = dgl.heterograph(graph_data)
 
     hg.nodes['user'].data['feature'] = userEmbedding
-    hg.nodes['tile'].data['feature'] = th.randn(hg.num_nodes('tile'), 10).to('cuda:0')
+    hg.nodes['tile'].data['feature'] = tileEmbedding
     hg.edges['similarity'].data['weight'] = th.ones(hg.num_edges('similarity'), 1).to('cuda:0')
     hg.edges['interest'].data['weight'] = th.ones(hg.num_edges('interest'), 1).to('cuda:0')
     hg.edges['with'].data['weight'] = 0.1 * th.ones(hg.num_edges('with'), 1).to('cuda:0')
@@ -108,6 +108,7 @@ if __name__ == '__main__':
     # 主循环
     env = gym.make('MyEnv-v1')
     frames = []
+    his_vec = []
 
     for iteration in range(totalTime):
         # edge list for GCN
@@ -117,19 +118,21 @@ if __name__ == '__main__':
         edge_list2 = []     # tile to user
         edge_list3 = []  # tile to user
         labels = []
+        pre_u_embeddings = []
+        pre_t_embeddings = []
 
         for index1 in range(8):
             for index2 in range(args.tileNum):
                 tileTmp1 = index1 * 25 + index2 * 5
-                for index3 in range(args.tileNum):
+                for index3 in range(args.tileNum - 1):
                     edge_list3.append((tileTmp1 + index3, tileTmp1 + index3 + 1))
-                edge_list3.append((tileTmp1, tileTmp1 + args.tileNum))
+                edge_list3.append((tileTmp1, tileTmp1 + (args.tileNum - 1)))
 
             for index2 in range(args.tileNum):
-                tileTmp1 = index1 * 25 + index2
-                for index3 in range(args.tileNum):
-                    edge_list3.append((tileTmp1 + index3 * 5, tileTmp1 + (index3 + 1) * 5))
-                edge_list3.append((tileTmp1, tileTmp1 + 5 * args.tileNum))
+                tileTmp2 = index1 * 25 + index2
+                for index3 in range(args.tileNum - 1):
+                    edge_list3.append((tileTmp2 + index3 * 5, tileTmp2 + (index3 + 1) * 5))
+                edge_list3.append((tileTmp2, tileTmp2 + 5 * (args.tileNum - 1)))
 
         # 获取所有用户历史记录
         for index, client in enumerate(videoUsers):
@@ -139,6 +142,12 @@ if __name__ == '__main__':
             next_vec, view_point_fix = client.get_nextView()
             if index == args.visId:
                 view_point = view_point_fix
+
+            vec_x = (view_point_fix[-1][0] - view_point_fix[0][0]) * 4
+            vec_y = (view_point_fix[-1][1] - view_point_fix[0][1]) * 4
+            distance = (vec_x ** 2 + vec_y ** 2) ** 0.5
+            # pre_u_embeddings.append([view_point_fix[-1][0], view_point_fix[-1][1], vec_x, vec_y, distance])
+            pre_u_embeddings.append(next_vec)
             futureRecord.append(next_vec)
 
         for index1, value1 in enumerate(historyRecord):
@@ -149,23 +158,31 @@ if __name__ == '__main__':
 
         for index1 in range(totalUser):
             if index1 >= args.testNum:
-                for index2, value2 in enumerate(historyRecord[index1]):
-                    if value2 == 1:
-                        edge_list2.append((index1, index2))
+                # for index2, value2 in enumerate(historyRecord[index1]):
+                #    if value2 == 1:
+                #        edge_list2.append((index1, index2))
                 for index2, value2 in enumerate(futureRecord[index1]):
                     if value2 == 1:
                         edge_list2.append((index1, index2))
             else:
                 labels.append(futureRecord[index1])
 
-        if iteration == 0:
-            user_feats = th.randn(totalUser, 10).to('cuda:0')
+        historyRecordNP = np.array(historyRecord) / (totalUser - args.testNum)
+        his_vec.append(historyRecordNP.sum(axis=0))
+
+        user_feats = th.tensor(pre_u_embeddings).to(th.float32).to('cuda:0')
+
+        if iteration < 199:
+            tile_feats = th.randn(args.tileNum ** 2 * 8, 200).to('cuda:0')
         else:
-            # user_feats = hGraph.nodes['user'].data['feature'].to('cuda:0')
-            user_feats = th.randn(totalUser, 10).to('cuda:0')
+            futureNP = np.array(futureRecord[0:args.testNum]).sum(axis=0) / args.testNum
+            historyNP = his_vec[-199:]
+            pre_u_embeddings = np.r_[historyNP, futureNP.reshape(1, 200)]
+            tile_feats = th.tensor(pre_u_embeddings.T).to(th.float32).to('cuda:0')
+
         k = 5
-        hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats)
-        model = Model(10, 20, k, hGraph.etypes).cuda()
+        hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats, tileEmbedding=tile_feats)
+        model = Model(200, 100, k, hGraph.etypes).cuda()
         user_feats = hGraph.nodes['user'].data['feature'].to('cuda:0')
         tile_feats = hGraph.nodes['tile'].data['feature'].to('cuda:0')
         node_features = {'user': user_feats, 'tile': tile_feats}
@@ -175,11 +192,29 @@ if __name__ == '__main__':
         for epoch in range(args.epochGCN):
             negative_graph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
             pos_score, neg_score = model(hGraph, negative_graph, node_features, ('user', 'interest', 'tile'))
+            node_embeddings = model.sage(hGraph, node_features)
+            #if epoch == 0:
+                # user_embeddings_pre = node_embeddings['user']
+                # tile_embeddings_pre = node_embeddings['user']
+                # loss_pre = args.alpha * compute_loss(pos_score, neg_score)
+                # loss = loss_pre
+            #else:
+                # user_embeddings_cur = node_embeddings['user']
+                # tile_embeddings_cur = node_embeddings['user']
+                # a = th.abs(user_embeddings_cur.clone() - user_embeddings_pre.clone()).sum().sum()
+                # b = th.abs(tile_embeddings_cur.clone() - tile_embeddings_pre.clone()).sum().sum()
+                # user_embeddings_pre = user_embeddings_cur
+                # tile_embeddings_pre = tile_embeddings_cur
+                # loss2 = a.clone() + b.clone()
+                # loss_cur = args.alpha * compute_loss(pos_score, neg_score)
+                # loss = args.alpha * loss_cur
+                # print(args.alpha * loss.item(), args.beta * loss2.item())
+                # loss_pre = loss_cur
             loss = compute_loss(pos_score, neg_score)
             opt.zero_grad()
             loss.backward()
             opt.step()
-            # print(loss.item())
+
         endT1 = time()
         totalT1 = endT1 - startT1
 
