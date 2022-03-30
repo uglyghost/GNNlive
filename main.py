@@ -5,6 +5,7 @@ import numpy as np
 import dgl
 import torch as th
 from model.RGCN import Model
+from model.PositionalEncoding import PositionalEncoding as PosEncoder
 from matplotlib import animation
 import matplotlib.pyplot as plt
 import gym
@@ -115,7 +116,6 @@ if __name__ == '__main__':
         historyRecord = []
         futureRecord = []
         edge_list1 = []     # user to user
-        edge_list2 = []     # tile to user
         edge_list3 = []  # tile to user
         labels = []
         pre_u_embeddings = []
@@ -136,8 +136,8 @@ if __name__ == '__main__':
 
         # 获取所有用户历史记录
         for index, client in enumerate(videoUsers):
-            next_vec, _ = client.get_history()
-            historyRecord.append(next_vec)
+            hist_vec, _ = client.get_history()
+            historyRecord.append(hist_vec)
 
             next_vec, view_point_fix = client.get_nextView()
             if index == args.visId:
@@ -155,17 +155,7 @@ if __name__ == '__main__':
                 similarity = np.sum(np.trunc((np.sum([value1, value2], axis=0))) != 1)
                 if similarity > args.threshold:
                     edge_list1.append((index1, index1 + 1 + index2))
-
-        for index1 in range(totalUser):
-            if index1 >= args.testNum:
-                # for index2, value2 in enumerate(historyRecord[index1]):
-                #    if value2 == 1:
-                #        edge_list2.append((index1, index2))
-                for index2, value2 in enumerate(futureRecord[index1]):
-                    if value2 == 1:
-                        edge_list2.append((index1, index2))
-            else:
-                labels.append(futureRecord[index1])
+            edge_list1.append((index1, index1))
 
         historyRecordNP = np.array(historyRecord) / (totalUser - args.testNum)
         his_vec.append(historyRecordNP.sum(axis=0))
@@ -180,72 +170,86 @@ if __name__ == '__main__':
             pre_u_embeddings = np.r_[historyNP, futureNP.reshape(1, 200)]
             tile_feats = th.tensor(pre_u_embeddings.T).to(th.float32).to('cuda:0')
 
-        k = 5
-        hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats, tileEmbedding=tile_feats)
-        model = Model(200, 100, k, hGraph.etypes).cuda()
-        user_feats = hGraph.nodes['user'].data['feature'].to('cuda:0')
-        tile_feats = hGraph.nodes['tile'].data['feature'].to('cuda:0')
-        node_features = {'user': user_feats, 'tile': tile_feats}
-        opt = th.optim.Adam(model.parameters())
+        """
+        for index1 in range(totalUser):
+            if index1 >= args.testNum:
+                # for index2, value2 in enumerate(historyRecord[index1]):
+                #    if value2 == 1:
+                #        edge_list2.append((index1, index2))
+                for index2, value2 in enumerate(futureRecord[index1]):
+                    if value2 == 1:
+                        edge_list2.append((index1, index2))
+            else:
+                labels.append(futureRecord[index1])
+        """
 
-        startT1 = time()
-        for epoch in range(args.epochGCN):
-            negative_graph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
-            pos_score, neg_score = model(hGraph, negative_graph, node_features, ('user', 'interest', 'tile'))
-            node_embeddings = model.sage(hGraph, node_features)
-            #if epoch == 0:
-                # user_embeddings_pre = node_embeddings['user']
-                # tile_embeddings_pre = node_embeddings['user']
-                # loss_pre = args.alpha * compute_loss(pos_score, neg_score)
-                # loss = loss_pre
-            #else:
-                # user_embeddings_cur = node_embeddings['user']
-                # tile_embeddings_cur = node_embeddings['user']
-                # a = th.abs(user_embeddings_cur.clone() - user_embeddings_pre.clone()).sum().sum()
-                # b = th.abs(tile_embeddings_cur.clone() - tile_embeddings_pre.clone()).sum().sum()
-                # user_embeddings_pre = user_embeddings_cur
-                # tile_embeddings_pre = tile_embeddings_cur
-                # loss2 = a.clone() + b.clone()
-                # loss_cur = args.alpha * compute_loss(pos_score, neg_score)
-                # loss = args.alpha * loss_cur
-                # print(args.alpha * loss.item(), args.beta * loss2.item())
-                # loss_pre = loss_cur
-            loss = compute_loss(pos_score, neg_score)
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+        for index1 in range(totalUser):
+            labels.append(futureRecord[index1])
 
-        endT1 = time()
-        totalT1 = endT1 - startT1
+        edge_list2 = []  # tile to user
+        for index1 in range(totalUser):
+            for index2, value2 in enumerate(historyRecord[index1]):
+                if value2 == 1:
+                    edge_list2.append((index1, index2))
 
-        node_embeddings = model.sage(hGraph, node_features)
-
-        user_embeddings = node_embeddings['user'][0:args.testNum]
-        tile_embeddings = node_embeddings['tile']
-
-        result = model.predict(user_embeddings, tile_embeddings, args.thred)
-
+        k = 8
         TP, TN, FP, FN = 0, 0, 0, 0
         PredictedTile = 0
-        for index1, value1 in enumerate(labels):
 
-            if args.visId == index1:
-                env.setPrediction(result[index1, :])
+        # 补充位置关系
+        encoder = PosEncoder(200, dropout=0.2, max_len=200).cuda()
+        # user_feats_en = encoder(user_feats)
+        tile_feats_en = encoder(tile_feats)
+
+        startT1 = time()
+        for index1 in range(totalUser - 1):
+            for index2, value2 in enumerate(futureRecord[index1]):
+                if value2 == 1:
+                    edge_list2.append((index1, index2))
+
+            hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats, tileEmbedding=tile_feats)
+            model = Model(200, 100, k, hGraph.etypes).cuda()
+            user_feats = hGraph.nodes['user'].data['feature'].to('cuda:0')
+            tile_feats = hGraph.nodes['tile'].data['feature'].to('cuda:0')
+            node_features = {'user': user_feats, 'tile': tile_feats}
+            opt = th.optim.Adam(model.parameters())
+
+            for epoch in range(args.epochGCN):
+                negative_graph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
+                pos_score, neg_score = model(hGraph, negative_graph, node_features, ('user', 'interest', 'tile'))
+                node_embeddings = model.sage(hGraph, node_features)
+                loss = compute_loss(pos_score, neg_score)
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+
+            node_embeddings = model.sage(hGraph, node_features)
+
+            user_embeddings = node_embeddings['user'][index1 + 1]
+            tile_embeddings = node_embeddings['tile']
+
+            result = model.predict(user_embeddings.reshape(1, k), tile_embeddings, args.thred)
+
+            if args.visId == index1 + 1:
+                env.setPrediction(result[0, :])
                 env.setFov(view_point)
                 frames.append(env.render(mode='rgb_array'))
                 env.render()
 
-            for index2, value2 in enumerate(value1):
-                if value2 == 1 and result[index1, index2] == 1:
+            for index2, value2 in enumerate(labels[index1 + 1]):
+                if value2 == 1 and result[0, index2] == 1:   # result[index1, index2]
                     TP += 1
                     PredictedTile += 1
-                elif value2 == 1 and result[index1, index2] == 0:
+                elif value2 == 1 and result[0, index2] == 0:  # result[index1, index2]
                     FP += 1
-                elif value2 == 0 and result[index1, index2] == 1:
+                elif value2 == 0 and result[0, index2] == 1:  # result[index1, index2]
                     FN += 1
                     PredictedTile += 1
-                elif value2 == 0 and result[index1, index2] == 0:
+                elif value2 == 0 and result[0, index2] == 0:  # result[index1, index2]
                     TN += 1
+
+        endT1 = time()
+        totalT1 = endT1 - startT1
 
         if TP + TN + FP + FN == 0:
             accuracy = 0
@@ -271,8 +275,8 @@ if __name__ == '__main__':
 
         print("accuracy:", str(accuracy),
               "precision:", str(precision),
-              "recall", str(recall),
-              "predicted tile", str(avePreTile),
+              "recall:", str(recall),
+              "predicted tile:", str(avePreTile),
               "Train Time:", str(totalT1))
 
         sortedValues = [str(accuracy), str(precision), str(recall), str(avePreTile), str(totalT1)]

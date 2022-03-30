@@ -12,11 +12,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import dgl.function as fn
-import numpy as np
 
 
 # Define a Heterograph Conv model
-
 class RGCN(nn.Module):
     def __init__(self, in_feats, hid_feats, out_feats, rel_names):
         super().__init__()

@@ -10,9 +10,9 @@ parser.add_argument('--beta', default=100, type=int, help='weight of stability')
 
 # for 360 degree video
 parser.add_argument('--sampleRate', default=1, type=int, help='how many frame of each')
-parser.add_argument('--videoId', default=1, type=int, help='select video')
-parser.add_argument('--visId', default=99, type=int, help='visualization user ID')
-parser.add_argument('--epochGCN', default=500, type=float, help='the epoch for GCN')
+parser.add_argument('--videoId', default=2, type=int, help='select video')
+parser.add_argument('--visId', default=14, type=int, help='visualization user ID')
+parser.add_argument('--epochGCN', default=200, type=float, help='the epoch for GCN')
 parser.add_argument('--tileNum', default=5, type=int, help='number of tile for each row')
 
 # cluster
@@ -20,8 +20,8 @@ parser.add_argument('--threshold', default=180, type=int, help='threshold of vie
 parser.add_argument('--thred', default=0.0, type=float, help='threshold of viewing similarity')
 
 # for GCN train and test
-parser.add_argument('--trainNum', default=30, type=int, help='number of user for training')
-parser.add_argument('--testNum', default=5, type=int, help='number of user for test')
+parser.add_argument('--trainNum', default=5, type=int, help='number of user for training')
+parser.add_argument('--testNum', default=10, type=int, help='number of user for test')
 
 # dataset path settings
 parser.add_argument('--records_path', default='D:/Multimedia/FoV_Prediction/Dataset/VRdataset/Experiment_',
