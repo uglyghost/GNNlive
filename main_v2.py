@@ -114,105 +114,106 @@ if __name__ == '__main__':
 
     for iteration in range(totalTime):
         # edge list for GCN
-        historyRecord = []
-        futureRecord = []
-        edge_list1 = []     # user to user
-        edge_list3 = []  # tile to user
-        labels = []
-        FoV_list = []
-        history_list = []
-        pre_u_embeddings = []
-        pre_t_embeddings = []
+        historyRecord = []      # 用户行为的历史记录
+        futureRecord = []       # 用户行为未来记录
 
-        for index1 in range(args.window):
-            for index2 in range(args.tileNum):
-                tileTmp1 = index1 * 25 + index2 * 5
-                for index3 in range(args.tileNum - 1):
-                    edge_list3.append((tileTmp1 + index3, tileTmp1 + index3 + 1))
-                edge_list3.append((tileTmp1, tileTmp1 + (args.tileNum - 1)))
+        edge_list1 = []         # 用户和用户的相似关系
+        edge_list2 = []         # 用户和视频瓦片的关系
+        edge_list3 = []         # 瓦片与瓦片之间的关系
 
-            for index2 in range(args.tileNum):
-                tileTmp2 = index1 * 25 + index2
-                for index3 in range(args.tileNum - 1):
-                    edge_list3.append((tileTmp2 + index3 * 5, tileTmp2 + (index3 + 1) * 5))
-                edge_list3.append((tileTmp2, tileTmp2 + 5 * (args.tileNum - 1)))
+        his_and_fut_list = []   # 历史和未来图关系整合
+
+        labels = []             # 真实的观看记录标签
+        pre_u_embeddings = []   # 初始用户的embeddings
+        pre_t_embeddings = []   # 初始瓦片的embeddings
 
         # 获取所有用户历史记录
         for index, client in enumerate(videoUsers):
+            # 获取历史的观看记录
             hist_vec, _ = client.get_history()
             historyRecord.append(hist_vec)
 
+            # 获取未来的观看记录
             next_vec, view_point_fix = client.get_nextView()
+            futureRecord.append(next_vec)
+
+            # 获取综合观看记录
+            total_vec = hist_vec + next_vec
+            his_and_fut_list.append(np.array(total_vec).reshape(2 * args.window, args.tileNum ** 2))
+
+            # 可视化选项
             if index == args.visId:
                 view_point = view_point_fix
 
             vec_x = (view_point_fix[-1][0] - view_point_fix[0][0]) * 100
             vec_y = (view_point_fix[-1][1] - view_point_fix[0][1]) * 100
             distance = (vec_x ** 2 + vec_y ** 2) ** 0.5
-            # pre_u_embeddings.append(hist_vec + [vec_x, vec_y, distance])
+
+            # 初始的用户embeddings设置
             pre_u_embeddings.append(hist_vec)
-            pre_t_embeddings.append(next_vec)
-            futureRecord.append(next_vec)
 
-        for index1, value1 in enumerate(historyRecord):
-            for index2, value2 in enumerate(historyRecord[index1 + 1:]):
-                similarity = np.sum(np.trunc((np.sum([value1, value2], axis=0))) != 1)
-                if similarity > args.threshold:
-                    edge_list1.append((index1, index1 + 1 + index2))
-            edge_list1.append((index1, index1))
+        # 计算每帧用户的相似关系
+        for index1 in range(args.window * 2):
+            edge_tmp = []
+            for index2, value2 in enumerate(his_and_fut_list):
+                for index3, value3 in enumerate(his_and_fut_list[index2 + 1:]):
+                    similarity = np.sum(np.trunc((np.sum([value3[index1], value2[index1]], axis=0))) != 1)
+                    if similarity > args.threshold:
+                        edge_tmp.append((index2, index2 + 1 + index3))
+            edge_list1.append(edge_tmp)
 
+        # 构建用户观看瓦片的关系
+        for index1 in range(args.window * 2):
+            edge_tmp = []
+            for index2, value2 in enumerate(his_and_fut_list):
+                for index3, value3 in enumerate(value2[index1]):
+                    if value3 == 1:
+                        edge_tmp.append((index2, index3))
+            edge_list2.append(edge_tmp)
+
+        # 构建瓦片与瓦片之间的位置关系图，相邻的瓦片存在相似关系
+        for index1 in range(args.window * 2):
+            edge_tmp = []
+            for index2 in range(args.tileNum):
+                tileTmp1 = index2 * 5
+                for index3 in range(args.tileNum - 1):
+                    edge_tmp.append((tileTmp1 + index3, tileTmp1 + index3 + 1))
+
+            for index2 in range(args.tileNum):
+                tileTmp2 = index2
+                for index3 in range(args.tileNum - 1):
+                    edge_tmp.append((tileTmp2 + index3 * 5, tileTmp2 + (index3 + 1) * 5))
+            edge_list3.append(edge_tmp)
+
+        # 瓦片的初始化特征为流行度变化趋势
         historyRecordNP = np.array(historyRecord) / (totalUser - args.testNum)
         his_vec.append(historyRecordNP.sum(axis=0))
 
         user_feats = th.tensor(pre_u_embeddings).to(th.float32).to('cuda:0')
 
-        if iteration < 200:
-            tile_feats = th.randn(args.tileNum ** 2 * args.window, 200).to('cuda:0')
+        if iteration < args.input_dim:
+            # 当记录不足 input_dim 条，随机初始化瓦片特征
+            tile_feats = th.randn(args.tileNum ** 2 * args.window, args.input_dim).to('cuda:0')
         else:
             futureNP = np.array(futureRecord[0:args.testNum]).sum(axis=0) / args.testNum
-            historyNP = his_vec[-199:]
-            pre_t_embeddings = np.r_[historyNP, futureNP.reshape(1, 200)]
+            historyNP = his_vec[1 - args.input_dim:]
+            pre_t_embeddings = np.r_[historyNP, futureNP.reshape(1, args.input_dim)]
             tile_feats = th.tensor(pre_t_embeddings.T).to(th.float32).to('cuda:0')
-
-        """
-        for index1 in range(totalUser):
-            if index1 >= args.testNum:
-                # for index2, value2 in enumerate(historyRecord[index1]):
-                #    if value2 == 1:
-                #        edge_list2.append((index1, index2))
-                for index2, value2 in enumerate(futureRecord[index1]):
-                    if value2 == 1:
-                        edge_list2.append((index1, index2))
-            else:
-                labels.append(futureRecord[index1])
-        """
 
         for index1 in range(totalUser):
             labels.append(futureRecord[index1])
 
-        edge_list2 = []  # tile to user
-        for index1 in range(totalUser):
-            for index2, value2 in enumerate(historyRecord[index1]):
-                if value2 == 1:
-                    edge_list2.append((index1, index2))
-
-        k = 200
-
-        # 补充位置关系
-        # encoder = PosEncoder(200, dropout=0.4, max_len=200).cuda()
-        # user_feats_en = encoder(user_feats)
-        # tile_feats_en = encoder(tile_feats)
+        k = args.input_dim
 
         for index1 in range(totalUser - 1):
             TP, TN, FP, FN = 0, 0, 0, 0
             PredictedTile = 0
             startT1 = time()
-            for index2, value2 in enumerate(futureRecord[index1]):
-                if value2 == 1:
-                    edge_list2.append((index1, index2))
 
             hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats, tileEmbedding=tile_feats)
-            model = Model(200, 100, k, hGraph.etypes).cuda()
+
+            # 等待修改
+            model = Model(args.input_dim, 100, k, hGraph.etypes).cuda()
             user_feats = hGraph.nodes['user'].data['feature'].to('cuda:0')
             tile_feats = hGraph.nodes['tile'].data['feature'].to('cuda:0')
             node_features = {'user': user_feats, 'tile': tile_feats}

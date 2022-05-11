@@ -10,31 +10,37 @@ class allWriter(object):
         self.epochGCN = config.epochGCN
         self.log_path = config.log_path
 
-        CSVfilenameAcc = self.videoName + '_' + str(self.userId) + 'Tk_EpoMax' + str(self.epochGCN) \
-                         + '_AccAndBandwidth.csv'
-        fileAcc = open(config.log_path + CSVfilenameAcc, 'w', newline='')
-        CSVfilenameTime = self.videoName + '_' + str(self.userId) + 'Tk_EpoMax' + str(self.epochGCN) \
-                         + '_TimeConsumption.csv'
-        fileTime = open(config.log_path + CSVfilenameTime, 'w', newline='')
+        # CSVfilenameAcc = self.videoName + '_' + str(self.userId) + 'Tk_EpoMax' + str(self.epochGCN) \
+        #                  + '_AccAndBandwidth.csv'
+        # fileAcc = open(config.log_path + CSVfilenameAcc, 'w', newline='')
+        self.CSVfilenameTime = self.videoName + '_' + str(self.userId) + 'Tk_EpoMax' + str(self.epochGCN) \
+                               + '_TimeConsumption.csv'
+        #fileTime = open(self.log_path + self.CSVfilenameTime, 'w', newline='')
 
-        self.writerAcc = csv.writer(fileAcc)
-        self.writerTime = csv.writer(fileTime)
+        # self.writerAcc = csv.writer(fileAcc)
+        #self.writerTime = csv.writer(fileTime)
+
+        #fileTime.close()
 
     """
     写入数据
     """
     def writerHead(self, TileNO):
-        rows = [['VideoName', 'UserIndex', 'epochRGCN'],
-                [self.videoName, str(self.userId), str(self.epochGCN)]]
-        self.writerAcc.writerows(rows)
-        self.writerTime.writerows(rows)
+        # rows = [['VideoName', 'UserIndex', 'epochRGCN'],
+        #        [self.videoName, str(self.userId), str(self.epochGCN)]]
+        # self.writerAcc.writerows(rows)
+        # self.writerTime.writerows(rows)
 
-        TotalSize = 'Size/' + str(TileNO * TileNO)
-        sortedValues = ['accuracy', 'precision', 'recall', 'predicted tile', 'total size']
-        self.writerAcc.writerow(sortedValues)
+        # TotalSize = 'Size/' + str(TileNO * TileNO)
+        # sortedValues = ['accuracy', 'precision', 'recall', 'predicted tile', 'total size']
+        # self.writerAcc.writerow(sortedValues)
+        fileTime = open(self.log_path + self.CSVfilenameTime, 'w', newline='')
 
-        ValueTime = ['running time', 'epochs', 'FirstLoss', 'FinalLoss']
+        ValueTime = ['accuracy', 'precision', 'recall', 'predicted tile', 'total size']
+        self.writerTime = csv.writer(fileTime)
         self.writerTime.writerow(ValueTime)
+
+        fileTime.close()
 
     """
     写入数据
@@ -47,7 +53,18 @@ class allWriter(object):
         return out
 
     def writerCSVT(self, content):
+        fileTime = open(self.log_path + self.CSVfilenameTime, 'a', newline='')
+
+        self.writerTime = csv.writer(fileTime)
         self.writerTime.writerow(content)
 
+        fileTime.close()
+
     def writerCSVA(self, content):
+        fileTime = open(self.log_path + self.CSVfilenameTime, 'a', newline='')
+
+        self.writerTime = csv.writer(fileTime)
         self.writerTime.writerow(content)
+
+        fileTime.close()
+

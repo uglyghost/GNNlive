@@ -55,5 +55,6 @@ class Model(nn.Module):
 
     def predict(self, user_emb, tile_emb, thred):
         adj_rec = torch.mm(user_emb, tile_emb.T)
-        adj_rec = torch.where(adj_rec > thred, 1, 0)
+        thred_min = torch.min(torch.topk(adj_rec, thred.int()).values)
+        adj_rec = torch.where(adj_rec > thred_min, 1, 0)
         return adj_rec

@@ -272,7 +272,7 @@ class LiveVideo(object):
         # 生成log的CSV文件
         self.allWriter.writerHead(self.tileNO)
         # 生成视频文件
-        self.out = self.allWriter.writerVideo(self.frameRate, self.W_Frame, self.H_Frame)
+        # self.out = self.allWriter.writerVideo(self.frameRate, self.W_Frame, self.H_Frame)
 
     def get_time(self):
         return int(self.totalFrames / self.bufLen) - 1
