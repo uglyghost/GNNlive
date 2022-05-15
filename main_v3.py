@@ -124,7 +124,7 @@ if __name__ == '__main__':
         pre_u_embeddings = []
         pre_t_embeddings = []
 
-        for index1 in range(args.window):
+        for index1 in range(args.window * 2):
             for index2 in range(args.tileNum):
                 tileTmp1 = index1 * 25 + index2 * 5
                 for index3 in range(args.tileNum - 1):
@@ -167,9 +167,9 @@ if __name__ == '__main__':
         user_feats = th.tensor(pre_u_embeddings).to(th.float32).to('cuda:0')
 
         if iteration < 200:
-            tile_feats = th.randn(args.tileNum ** 2 * args.window, 200).to('cuda:0')
+            tile_feats = th.randn(args.tileNum ** 2 * args.window * 2, 200).to('cuda:0')
         else:
-            futureNP = np.array(futureRecord[0:args.testNum]).sum(axis=0) / args.testNum
+            futureNP = np.array(futureRecord[0:totalUser]).sum(axis=0) / args.testNum
             historyNP = his_vec[-199:]
             pre_t_embeddings = np.r_[historyNP, futureNP.reshape(1, 200)]
             tile_feats = th.tensor(pre_t_embeddings.T).to(th.float32).to('cuda:0')
@@ -198,18 +198,23 @@ if __name__ == '__main__':
 
         k = 200
 
+        for index1 in range(args.trainNum):
+            for index2, value2 in enumerate(futureRecord[index1]):
+                if value2 == 1:
+                    edge_list2.append((index1, 200 + index2))
+
         # 补充位置关系
         # encoder = PosEncoder(200, dropout=0.4, max_len=200).cuda()
         # user_feats_en = encoder(user_feats)
         # tile_feats_en = encoder(tile_feats)
 
-        for index1 in range(totalUser - 1):
+        for index1 in range(args.testNum):
             TP, TN, FP, FN = 0, 0, 0, 0
             PredictedTile = 0
             startT1 = time()
             for index2, value2 in enumerate(futureRecord[index1]):
                 if value2 == 1:
-                    edge_list2.append((index1, index2))
+                    edge_list2.append((args.trainNum + index1, 200 + index2))
 
             hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats, tileEmbedding=tile_feats)
             model = Model(200, 100, k, hGraph.etypes).cuda()
@@ -221,19 +226,17 @@ if __name__ == '__main__':
             for epoch in range(args.epochGCN):
                 negative_graph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
                 pos_score, neg_score = model(hGraph, negative_graph, node_features, ('user', 'interest', 'tile'))
-                node_embeddings = model.sage(hGraph, node_features)
                 loss = compute_loss(pos_score, neg_score)
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
-                print(loss.item())
-            th.cuda.empty_cache()
+                # print(loss.item())
             #
 
             node_embeddings = model.sage(hGraph, node_features)
 
             user_embeddings = node_embeddings['user'][index1 + 1]
-            tile_embeddings = node_embeddings['tile']
+            tile_embeddings = node_embeddings['tile'][199:-1]
 
             result = model.predict(user_embeddings.reshape(1, k), tile_embeddings, thredhold[index1])
 
