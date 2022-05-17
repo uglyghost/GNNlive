@@ -57,7 +57,7 @@ class DRPGAT(nn.Module):
         weight_vars = {}
 
         for i in range(self.n_heads):
-            weight_var = torch.randn(self.output_dim, self.input_dim)
+            weight_var = nn.Parameter(torch.randn(self.output_dim, self.input_dim))
 
             weight_vars[i] = weight_var
 
@@ -146,12 +146,12 @@ class GRU_gate(nn.Module):
         self.activation = act
         self.reduce = reduce
 
-        self.W = glorot([n_node, output_dim])
-        self.U = glorot([output_dim, output_dim])
-        self.bias = zeros([input_dim, output_dim])
+        self.W = nn.Parameter(glorot([n_node, output_dim]))
+        self.U = nn.Parameter(glorot([output_dim, output_dim]))
+        self.bias = nn.Parameter(zeros([input_dim, output_dim]))
         if n_node != input_dim:
             self.reduce = True
-            self.P = glorot([input_dim, n_node])
+            self.P = nn.Parameter(glorot([input_dim, n_node]))
 
     def call(self, adj_mat, prev_w):
         #         out = self.activation(self.W.matmul(x) + \
