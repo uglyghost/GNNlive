@@ -5,8 +5,10 @@ import random
 
 import dgl
 import torch as th
+import torch.nn.functional as F
 from model.RGCN import Model
 from model.DRPGAT import DRPGAT
+from model.EVOLVE_GCN import EvolveGCNO, EvolveGCNH
 from matplotlib import animation
 import matplotlib.pyplot as plt
 import gym
@@ -53,15 +55,14 @@ def build_graph(edge_list1, edge_list2, edge_list3, userEmbedding, tileEmbedding
     }
     hg = dgl.heterograph(graph_data)
 
-    hg.nodes['user'].data['feature'] = userEmbedding
-    hg.nodes['tile'].data['feature'] = tileEmbedding
-    hg.edges['similarity'].data['weight'] = 0.2 * th.ones(hg.num_edges('similarity'), 1).to('cuda:0')
+    hg.nodes['user'].data['feat'] = userEmbedding
+    hg.nodes['tile'].data['feat'] = tileEmbedding
+    hg.edges['similarity'].data['weight'] = th.ones(hg.num_edges('similarity'), 1).to('cuda:0')
     hg.edges['interest'].data['weight'] = th.ones(hg.num_edges('interest'), 1).to('cuda:0')
-    hg.edges['with'].data['weight'] = 0.2 * th.ones(hg.num_edges('with'), 1).to('cuda:0')
+    hg.edges['with'].data['weight'] = th.ones(hg.num_edges('with'), 1).to('cuda:0')
 
     print(hg)
 
-    # g = dgl.graph((u, v), num_nodes=user_num + tile_num)
     return hg
 
 
@@ -171,8 +172,8 @@ if __name__ == '__main__':
         node_list = []          # 用户和瓦片的节点列表
 
         edge_list1 = []         # 用户和用户的相似关系
-        # edge_list2 = []         # 用户和视频瓦片的关系
-        # edge_list3 = []         # 瓦片与瓦片之间的关系
+        edge_list2 = []         # 用户和视频瓦片的关系
+        edge_list3 = []         # 瓦片与瓦片之间的关系
         edge_list1_n = []
 
         his_and_fut_list = []   # 历史和未来图关系整合
@@ -215,52 +216,44 @@ if __name__ == '__main__':
                 node_tmp.append((index1, {}))
             node_list.append(node_tmp)
 
-        for index1 in range(args.tileNum ** 2):
-            pre_u_embeddings.append(np.random.rand(200).tolist())
+        #for index1 in range(args.tileNum ** 2):
+        #    pre_u_embeddings.append(np.random.rand(200).tolist())
 
         # 计算每帧用户的相似关系
         for index1 in range(args.window * 2):
             edge_tmp = []
-            edge_tmp_n = []
             for index2, value2 in enumerate(his_and_fut_list):
                 for index3, value3 in enumerate(his_and_fut_list[index2 + 1:]):
                     similarity = np.sum(np.trunc((np.sum([value3[index1], value2[index1]], axis=0))) != 1)
                     if similarity > args.threshold:
-                        edge_tmp.append((index2, index2 + 1 + index3, {'weight': 1.0}))
-                        edge_tmp_n.append((random.randint(0, totalUser - 1),
-                                           random.randint(0, totalUser - 1), {'weight': 1.0}))
-            # edge_list1.append(edge_tmp)
+                        edge_tmp.append((index2, index2 + 1 + index3))
 
-        # 构建用户观看瓦片的关系
+            edge_list1.append(edge_tmp)
+
+            # 构建用户观看瓦片的关系
+            edge_tmp = []
             for index2, value2 in enumerate(his_and_fut_list):
                 for index3, value3 in enumerate(value2[index1]):
                     if value3 == 1:
-                        edge_tmp.append((index2, totalUser + index3, {'weight': 1.0}))
-                        edge_tmp_n.append((random.randint(0, totalUser - 1),
-                                           totalUser + random.randint(0, args.tileNum ** 2 - 1),
-                                           {'weight': 1.0}))
-            # edge_list1.append(edge_tmp)
+                        edge_tmp.append((index2, index3))
 
-        # 构建瓦片与瓦片之间的位置关系图，相邻的瓦片存在相似关系
+            edge_list2.append(edge_tmp)
+
+            # 构建瓦片与瓦片之间的位置关系图，相邻的瓦片存在相似关系
+            edge_tmp = []
             for index2 in range(args.tileNum):
                 tileTmp1 = index2 * 5
                 for index3 in range(args.tileNum - 1):
-                    edge_tmp.append((totalUser + tileTmp1 + index3,
-                                     totalUser + tileTmp1 + index3 + 1, {'weight': 1.0}))
-                    edge_tmp_n.append((totalUser + random.randint(0, args.tileNum ** 2 - 1),
-                                       totalUser + random.randint(0, args.tileNum ** 2 - 1),
-                                       {'weight': 1.0}))
+                    edge_tmp.append((tileTmp1 + index3,
+                                     tileTmp1 + index3 + 1))
 
             for index2 in range(args.tileNum):
                 tileTmp2 = index2
                 for index3 in range(args.tileNum - 1):
-                    edge_tmp.append((totalUser + tileTmp2 + index3 * 5,
-                                     totalUser + tileTmp2 + (index3 + 1) * 5, {'weight': 1.0}))
-                    edge_tmp_n.append((totalUser + random.randint(0, args.tileNum ** 2 - 1),
-                                       totalUser + random.randint(0, args.tileNum ** 2 - 1),
-                                       {'weight': 1.0}))
-            edge_list1.append(edge_tmp)
-            edge_list1_n.append(edge_tmp_n)
+                    edge_tmp.append((tileTmp2 + index3 * 5,
+                                    tileTmp2 + (index3 + 1) * 5))
+
+            edge_list3.append(edge_tmp)
             node_feature.append(pre_u_embeddings)
 
         # 瓦片的初始化特征为流行度变化趋势
@@ -287,98 +280,69 @@ if __name__ == '__main__':
             TP, TN, FP, FN = 0, 0, 0, 0
             PredictedTile = 0
             startT1 = time()
+            node_features = {'user': user_feats, 'tile': tile_feats}
 
             n_graphs = []
             graphs = []
-            for nodes, edges, edges_n in zip(node_list, edge_list1, edge_list1_n):
-                G = nx.MultiGraph()
-                G.add_nodes_from(nodes)
-                G.add_edges_from(edges)
-                graphs.append(G)
+            for index2 in range(args.window * 2):
+                hGraph = build_graph(edge_list1[index2],
+                                     edge_list2[index2],
+                                     edge_list3[index2],
+                                     userEmbedding=user_feats,
+                                     tileEmbedding=tile_feats)
+                negative_hGraph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
+                graphs.append(hGraph)
+                n_graphs.append(negative_hGraph)
 
-                n_G = nx.MultiGraph()
-                n_G.add_nodes_from(nodes)
-                n_G.add_edges_from(edges_n)
-                n_graphs.append(n_G)
+            if args.model == 'EvolveGCN-O':
+                model = EvolveGCNO(in_feats=k,
+                                   n_hidden=args.n_hidden,
+                                   num_layers=args.n_layers)
+            elif args.model == 'EvolveGCN-H':
+                model = EvolveGCNH(in_feats=k,
+                                   num_layers=args.n_layers)
 
-            adj_matrices = map(lambda x: nx.adjacency_matrix(x), graphs)
-            adjs = list(adj_matrices)
+            model = model.to(device)
+            optimizer = th.optim.Adam(model.parameters(), lr=args.lr)
 
-            n_adj_matrices = map(lambda x: nx.adjacency_matrix(x), n_graphs)
-            n_adjs = list(n_adj_matrices)
+            for i in range(args.window, args.window * 2 + 1):
+                g_list = graphs[i - args.window:i + 1]
+                ng_list = n_graphs[i - args.window:i + 1]
+                for epoch in range(args.epochGCN):
+                    model.train()
+                    # get predictions which has label
+                    pos_score, neg_score = model(g_list, ng_list, ('user', 'interest', 'tile'))
+                    loss = compute_loss(pos_score, neg_score)
 
-            p_covss = cal_patterns(adjs, args.window * 2, args.n_component)
-            n_p_covss = cal_patterns(n_adjs, args.window * 2, args.n_component)
-
-            # 等待修改
-            # hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats, tileEmbedding=tile_feats)
-
-            # model = Model(args.input_dim, 100, k, hGraph.etypes).cuda()
-
-            DRPGAT_model = DRPGAT(n_node=n_node,
-                                  input_dim=args.input_dim,
-                                  output_dim=args.output_dim,
-                                  seq_len=args.window * 2,
-                                  n_heads=args.num_heads,
-                                  attn_drop=0,
-                                  ffd_drop=0,
-                                  residual=False,
-                                  sparse_inputs=True
-                                  )
-
-            # user_feats = hGraph.nodes['user'].data['feature'].to('cuda:0')
-            # tile_feats = hGraph.nodes['tile'].data['feature'].to('cuda:0')
-            # node_features = {'user': user_feats, 'tile': tile_feats}
-            opt = th.optim.Adam(DRPGAT_model.parameters())
-
-            for epoch in range(args.epochGCN):
-                layer2_embeds_p = DRPGAT_model(adjs, node_feature, p_covss)
-                layer2_embeds_n = DRPGAT_model(n_adjs, node_feature, n_p_covss)
-                with th.autograd.set_detect_anomaly(True):
-                    layer2_embeds_p_u = layer2_embeds_p[args.window][0:totalUser, :]
-                    layer2_embeds_p_t = layer2_embeds_p[args.window][totalUser:-1, :]
-                    layer2_embeds_n_u = layer2_embeds_n[args.window][0:totalUser, :]
-                    layer2_embeds_n_t = layer2_embeds_n[args.window][totalUser:-1, :]
-                    p_score, n_score = DRPGAT_model.pred(layer2_embeds_p_u,
-                                                         layer2_embeds_p_t,
-                                                         layer2_embeds_n_u,
-                                                         layer2_embeds_n_t)
-                # node_embeddings = model.sage(hGraph, node_features)
-                    loss = compute_loss(p_score, n_score)
-                    opt.zero_grad()
+                    optimizer.zero_grad()
                     loss.backward()
-                    opt.step()
-                    print(loss.item())
+                    optimizer.step()
 
-            #
+                # 设置端点处
+                node_embeddings = model.sage(graphs[args.window + i], node_features)
 
-            # layer2_embeds_p = DRPGAT_model(adjs, user_feats + tile_feats, p_covss)
-            # layer2_embeds_n = DRPGAT_model(n_adjs, user_feats + tile_feats, n_p_covss)
+                user_embeddings = node_embeddings['user'][index1 + 1]
+                tile_embeddings = node_embeddings['tile']
 
-            node_embeddings = model.sage(hGraph, node_features)
+                result = model.predict(user_embeddings.reshape(1, k), tile_embeddings, thredhold[index1])
 
-            user_embeddings = node_embeddings['user'][index1 + 1]
-            tile_embeddings = node_embeddings['tile']
+                if args.visId == index1 + 1:
+                    env.setPrediction(result[0, :])
+                    env.setFov(view_point)
+                    frames.append(env.render(mode='rgb_array'))
+                    env.render()
 
-            result = model.predict(user_embeddings.reshape(1, k), tile_embeddings, thredhold[index1])
-
-            if args.visId == index1 + 1:
-                env.setPrediction(result[0, :])
-                env.setFov(view_point)
-                frames.append(env.render(mode='rgb_array'))
-                env.render()
-
-            for index2, value2 in enumerate(labels[index1 + 1]):
-                if value2 == 1 and result[0, index2] == 1:   # result[index1, index2]
-                    TP += 1
-                    PredictedTile += 1
-                elif value2 == 1 and result[0, index2] == 0:  # result[index1, index2]
-                    FP += 1
-                elif value2 == 0 and result[0, index2] == 1:  # result[index1, index2]
-                    FN += 1
-                    PredictedTile += 1
-                elif value2 == 0 and result[0, index2] == 0:  # result[index1, index2]
-                    TN += 1
+                for index2, value2 in enumerate(labels[index1 + 1]):
+                    if value2 == 1 and result[0, index2] == 1:   # result[index1, index2]
+                        TP += 1
+                        PredictedTile += 1
+                    elif value2 == 1 and result[0, index2] == 0:  # result[index1, index2]
+                        FP += 1
+                    elif value2 == 0 and result[0, index2] == 1:  # result[index1, index2]
+                        FN += 1
+                        PredictedTile += 1
+                    elif value2 == 0 and result[0, index2] == 0:  # result[index1, index2]
+                        TN += 1
 
             endT1 = time()
             totalT1 = endT1 - startT1

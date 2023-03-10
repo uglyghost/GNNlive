@@ -82,8 +82,8 @@ class DRPGAT(nn.Module):
 
     def pred(self, feats_p_u, feats_p_t, feats_n_u, feats_n_t):
         p_score = torch.mm(feats_p_u, feats_p_t.T, out=None).reshape(-1)
-        n_score = torch.mm(feats_n_u, feats_n_t.T, out=None).reshape(-1)
-
+        n_score = torch.mm(feats_p_u, feats_n_t.T, out=None).reshape(-1)
+        # n_score = torch.mm(feats_n_t, feats_n_u.T, out=None).reshape(-1)
         return p_score, n_score
 
     def __call__(self, *args, **kwargs):
@@ -148,10 +148,11 @@ class GRU_gate(nn.Module):
 
         self.W = nn.Parameter(glorot([n_node, output_dim]))
         self.U = nn.Parameter(glorot([output_dim, output_dim]))
-        self.bias = nn.Parameter(zeros([input_dim, output_dim]))
+        self.bias = nn.Parameter(glorot([input_dim, output_dim]))
         if n_node != input_dim:
             self.reduce = True
             self.P = nn.Parameter(glorot([input_dim, n_node]))
+            # self.P = nn.Parameter(torch.zeros([input_dim, n_node]))
 
     def call(self, adj_mat, prev_w):
         #         out = self.activation(self.W.matmul(x) + \
@@ -202,7 +203,7 @@ class Attn_head(nn.Module):
         seq = torch.tensor(x, dtype=torch.float32)
         if self.in_drop != 0.0:
             seq = self.in_dropout(x)
-        seq_fts = self.conv1(seq.reshape([55, self.in_channel, 1]))
+        seq_fts = self.conv1(seq.reshape([45, self.in_channel, 1]))
         f_1 = self.conv2_1(seq_fts)
         f_2 = self.conv2_2(seq_fts)
         logits = f_1 + torch.transpose(f_2, 2, 1)

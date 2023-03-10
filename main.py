@@ -5,7 +5,6 @@ import numpy as np
 import dgl
 import torch as th
 from model.RGCN import Model
-from model.PositionalEncoding import PositionalEncoding as PosEncoder
 from matplotlib import animation
 import matplotlib.pyplot as plt
 import gym
@@ -113,11 +112,11 @@ if __name__ == '__main__':
     thredhold = args.thred * th.ones(args.testNum + args.trainNum)
 
     for iteration in range(totalTime):
-        # edge list for GCN
         historyRecord = []
         futureRecord = []
-        edge_list1 = []     # user to user
-        edge_list3 = []  # tile to user
+        edge_list1 = []
+        edge_list2 = []
+        edge_list3 = []
         labels = []
         FoV_list = []
         history_list = []
@@ -149,7 +148,6 @@ if __name__ == '__main__':
             vec_x = (view_point_fix[-1][0] - view_point_fix[0][0]) * 100
             vec_y = (view_point_fix[-1][1] - view_point_fix[0][1]) * 100
             distance = (vec_x ** 2 + vec_y ** 2) ** 0.5
-            # pre_u_embeddings.append(hist_vec + [vec_x, vec_y, distance])
             pre_u_embeddings.append(hist_vec)
             pre_t_embeddings.append(next_vec)
             futureRecord.append(next_vec)
@@ -166,42 +164,26 @@ if __name__ == '__main__':
 
         user_feats = th.tensor(pre_u_embeddings).to(th.float32).to('cuda:0')
 
-        if iteration < 200:
-            tile_feats = th.randn(args.tileNum ** 2 * args.window, 200).to('cuda:0')
+        if iteration < args.window:
+            tile_feats = th.randn(args.tileNum ** 2 * args.window, 1).to('cuda:0')
+            tile_feats = tile_feats.expand(200, 200)
         else:
-            futureNP = np.array(futureRecord[0:args.testNum]).sum(axis=0) / args.testNum
-            historyNP = his_vec[-199:]
+            futureNP = np.array(futureRecord[0:args.trainNum]).sum(axis=0) / args.testNum
+            historyNP = his_vec[-args.window + 1:]
             pre_t_embeddings = np.r_[historyNP, futureNP.reshape(1, 200)]
-            tile_feats = th.tensor(pre_t_embeddings.T).to(th.float32).to('cuda:0')
-
-        """
-        for index1 in range(totalUser):
-            if index1 >= args.testNum:
-                # for index2, value2 in enumerate(historyRecord[index1]):
-                #    if value2 == 1:
-                #        edge_list2.append((index1, index2))
-                for index2, value2 in enumerate(futureRecord[index1]):
-                    if value2 == 1:
-                        edge_list2.append((index1, index2))
-            else:
-                labels.append(futureRecord[index1])
-        """
+            pre_t_embeddings = pre_t_embeddings.sum(axis=0)
+            tile_feats = th.tensor(pre_t_embeddings).to(th.float32).to('cuda:0')
+            tile_feats = tile_feats.expand(200, 200).T
 
         for index1 in range(totalUser):
             labels.append(futureRecord[index1])
 
-        edge_list2 = []  # tile to user
         for index1 in range(totalUser):
             for index2, value2 in enumerate(historyRecord[index1]):
                 if value2 == 1:
                     edge_list2.append((index1, index2))
 
         k = 200
-
-        # 补充位置关系
-        # encoder = PosEncoder(200, dropout=0.4, max_len=200).cuda()
-        # user_feats_en = encoder(user_feats)
-        # tile_feats_en = encoder(tile_feats)
 
         for index1 in range(totalUser - 1):
             TP, TN, FP, FN = 0, 0, 0, 0
@@ -218,6 +200,7 @@ if __name__ == '__main__':
             node_features = {'user': user_feats, 'tile': tile_feats}
             opt = th.optim.Adam(model.parameters())
 
+            th.cuda.empty_cache()
             for epoch in range(args.epochGCN):
                 negative_graph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
                 pos_score, neg_score = model(hGraph, negative_graph, node_features, ('user', 'interest', 'tile'))
@@ -226,9 +209,8 @@ if __name__ == '__main__':
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
-                print(loss.item())
+                # print(loss.item())
             th.cuda.empty_cache()
-            #
 
             node_embeddings = model.sage(hGraph, node_features)
 
@@ -237,22 +219,24 @@ if __name__ == '__main__':
 
             result = model.predict(user_embeddings.reshape(1, k), tile_embeddings, thredhold[index1])
 
+
             if args.visId == index1 + 1:
                 env.setPrediction(result[0, :])
                 env.setFov(view_point)
                 frames.append(env.render(mode='rgb_array'))
-                env.render()
+                # env.render()
+
 
             for index2, value2 in enumerate(labels[index1 + 1]):
-                if value2 == 1 and result[0, index2] == 1:   # result[index1, index2]
+                if value2 == 1 and result[0, index2] == 1:
                     TP += 1
                     PredictedTile += 1
-                elif value2 == 1 and result[0, index2] == 0:  # result[index1, index2]
+                elif value2 == 1 and result[0, index2] == 0:
                     FP += 1
-                elif value2 == 0 and result[0, index2] == 1:  # result[index1, index2]
+                elif value2 == 0 and result[0, index2] == 1:
                     FN += 1
                     PredictedTile += 1
-                elif value2 == 0 and result[0, index2] == 0:  # result[index1, index2]
+                elif value2 == 0 and result[0, index2] == 0:
                     TN += 1
 
             endT1 = time()
@@ -273,13 +257,13 @@ if __name__ == '__main__':
             else:
                 recall = TP / (TP + FN)
 
-            avePreTile = PredictedTile / 8  # / (8 * args.testNum)
+            avePreTile = PredictedTile / 8
 
-            if precision >= 0.8 and recall < 0.6:
+            if precision >= 0.85 and recall < 0.5:
                 thredhold[index1] += -1
-            elif precision < 0.8:
+            elif precision < 0.85:
                 thredhold[index1] += +1
-            aveTime = totalT1  # / (args.testNum + args.trainNum)
+            aveTime = totalT1
 
             print("accuracy:", str(accuracy),
                   "precision:", str(precision),
@@ -290,4 +274,6 @@ if __name__ == '__main__':
             sortedValues = [str(accuracy), str(precision), str(recall), str(avePreTile), str(aveTime)]
             videoUsers[index1].allWriter.writerCSVA(sortedValues)
 
-    display_frames_as_gif(args.policy, frames)
+    name_of_gif = args.policy + '_cluster_' + str(totalUser) + '_threshold_' + str(args.threshold) + \
+                  '_videoID_' + str(args.videoId)
+    display_frames_as_gif(name_of_gif, frames)

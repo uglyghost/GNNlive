@@ -53,7 +53,7 @@ def build_graph(edge_list1, edge_list2, edge_list3, userEmbedding, tileEmbedding
     hg.edges['interest'].data['weight'] = th.ones(hg.num_edges('interest'), 1).to('cuda:0')
     hg.edges['with'].data['weight'] = 0.2 * th.ones(hg.num_edges('with'), 1).to('cuda:0')
 
-    print(hg)
+    #print(hg)
 
     # g = dgl.graph((u, v), num_nodes=user_num + tile_num)
     return hg
@@ -208,13 +208,19 @@ if __name__ == '__main__':
         # user_feats_en = encoder(user_feats)
         # tile_feats_en = encoder(tile_feats)
 
-        for index1 in range(args.testNum):
+        for index1 in range(totalUser):
+
+            if sum(labels[index1]) == 0:
+                continue
+
             TP, TN, FP, FN = 0, 0, 0, 0
             PredictedTile = 0
             startT1 = time()
+            '''
             for index2, value2 in enumerate(futureRecord[index1]):
                 if value2 == 1:
                     edge_list2.append((args.trainNum + index1, 200 + index2))
+            '''
 
             hGraph = build_graph(edge_list1, edge_list2, edge_list3, userEmbedding=user_feats, tileEmbedding=tile_feats)
             model = Model(200, 100, k, hGraph.etypes).cuda()
@@ -224,6 +230,7 @@ if __name__ == '__main__':
             opt = th.optim.Adam(model.parameters())
 
             for epoch in range(args.epochGCN):
+                th.cuda.empty_cache()
                 negative_graph = construct_negative_graph(hGraph, k, ('user', 'interest', 'tile'))
                 pos_score, neg_score = model(hGraph, negative_graph, node_features, ('user', 'interest', 'tile'))
                 loss = compute_loss(pos_score, neg_score)
@@ -231,29 +238,32 @@ if __name__ == '__main__':
                 loss.backward()
                 opt.step()
                 # print(loss.item())
+
             #
+            # if index1 < args.trainNum:
+            #    continue
 
             node_embeddings = model.sage(hGraph, node_features)
 
-            user_embeddings = node_embeddings['user'][index1 + 1]
-            tile_embeddings = node_embeddings['tile'][199:-1]
+            user_embeddings = node_embeddings['user'][index1]
+            tile_embeddings = node_embeddings['tile'][200:]
 
             result = model.predict(user_embeddings.reshape(1, k), tile_embeddings, thredhold[index1])
 
-            if args.visId == index1 + 1:
+            if args.visId == index1:
                 env.setPrediction(result[0, :])
                 env.setFov(view_point)
                 frames.append(env.render(mode='rgb_array'))
                 env.render()
 
-            for index2, value2 in enumerate(labels[index1 + 1]):
+            for index2, value2 in enumerate(labels[index1]):
                 if value2 == 1 and result[0, index2] == 1:   # result[index1, index2]
                     TP += 1
                     PredictedTile += 1
                 elif value2 == 1 and result[0, index2] == 0:  # result[index1, index2]
-                    FP += 1
-                elif value2 == 0 and result[0, index2] == 1:  # result[index1, index2]
                     FN += 1
+                elif value2 == 0 and result[0, index2] == 1:  # result[index1, index2]
+                    FP += 1
                     PredictedTile += 1
                 elif value2 == 0 and result[0, index2] == 0:  # result[index1, index2]
                     TN += 1
@@ -278,9 +288,9 @@ if __name__ == '__main__':
 
             avePreTile = PredictedTile / 8  # / (8 * args.testNum)
 
-            if precision >= 0.8 and recall < 0.6:
+            if recall >= 0.9 and precision < 0.6:
                 thredhold[index1] += -1
-            elif precision < 0.8:
+            elif recall < 0.9:
                 thredhold[index1] += +1
             aveTime = totalT1  # / (args.testNum + args.trainNum)
 
