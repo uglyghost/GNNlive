@@ -1,3 +1,6 @@
+We have provided the experimental results data and the complete version of the code for everyone to verify. In addition, the training dataset will be provided later.
+
+
 # GL360: Graph Representation Learning based FoV Prediction for 360° Live Video Streaming
 
 ## 1. Abstract
