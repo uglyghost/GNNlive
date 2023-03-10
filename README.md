@@ -10,4 +10,4 @@
 
   (1-7-Cooking Battle)  |  (1-8-Football)  |  (1-9-Rhinos)
 :-------------------------:|:-------------------------:|:-------------------------:
-![alt-text-1](pic/1-7-Cooking Battle.gif "1-7-Cooking Battle") |  ![alt-text-2](pic/viewport_result.gif "title-5") |  ![alt-text-2](pic/viewport_result.gif "title-6")
+![alt-text-1](pic/1-7-Cooking.gif "1-7-Cooking Battle") |  ![alt-text-2](pic/viewport_result.gif "title-5") |  ![alt-text-2](pic/viewport_result.gif "title-6")
