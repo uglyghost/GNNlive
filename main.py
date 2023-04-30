@@ -9,6 +9,7 @@ from matplotlib import animation
 import matplotlib.pyplot as plt
 import gym
 from time import time
+import env
 
 
 def display_frames_as_gif(policy, frames):
@@ -149,7 +150,7 @@ if __name__ == '__main__':
             vec_y = (view_point_fix[-1][1] - view_point_fix[0][1]) * 100
             distance = (vec_x ** 2 + vec_y ** 2) ** 0.5
             pre_u_embeddings.append(hist_vec)
-            pre_t_embeddings.append(next_vec)
+            # pre_t_embeddings.append(next_vec)
             futureRecord.append(next_vec)
 
         for index1, value1 in enumerate(historyRecord):
@@ -168,9 +169,10 @@ if __name__ == '__main__':
             tile_feats = th.randn(args.tileNum ** 2 * args.window, 1).to('cuda:0')
             tile_feats = tile_feats.expand(200, 200)
         else:
-            futureNP = np.array(futureRecord[0:args.trainNum]).sum(axis=0) / args.testNum
-            historyNP = his_vec[-args.window + 1:]
-            pre_t_embeddings = np.r_[historyNP, futureNP.reshape(1, 200)]
+            # futureNP = np.array(futureRecord[0:args.trainNum]).sum(axis=0) / args.testNum
+            futureNP = np.array(futureRecord).sum(axis=0) / len(futureRecord)
+            # historyNP = his_vec[-args.window + 1:] / len(his_vec)
+            pre_t_embeddings = np.r_[futureNP.reshape(1, 200)]
             pre_t_embeddings = pre_t_embeddings.sum(axis=0)
             tile_feats = th.tensor(pre_t_embeddings).to(th.float32).to('cuda:0')
             tile_feats = tile_feats.expand(200, 200).T
@@ -276,4 +278,4 @@ if __name__ == '__main__':
 
     name_of_gif = args.policy + '_cluster_' + str(totalUser) + '_threshold_' + str(args.threshold) + \
                   '_videoID_' + str(args.videoId)
-    display_frames_as_gif(name_of_gif, frames)
+    # display_frames_as_gif(name_of_gif, frames)
